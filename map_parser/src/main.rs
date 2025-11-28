@@ -34,6 +34,18 @@ fn format_double_digit(value: u8) -> String {
     format!("{:02}", value)
 }
 
+/// Determine gravity from the original value at position [0][0]
+fn determine_gravity(gravity_index: u8) -> Option<(f32, f32, f32)> {
+    match gravity_index {
+        3 => Some((0.0, 0.0, 0.0)),   // Zero gravity
+        4 => Some((2.0, 0.0, 0.0)),   // 5G (light)
+        5 => Some((10.0, 0.0, 0.0)),  // 10G (normal/Earth)
+        6 => Some((20.0, 0.0, 0.0)),  // 20G (heavy)
+        7 => Some((-1.0, -0.5, 0.0)), // Queer gravity (random)
+        _ => None,
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct MapFile {
     magic: String,
@@ -44,9 +56,11 @@ struct MapFile {
 #[derive(Debug, Serialize)]
 struct MapEntry {
     name: String,
+    description: String,
     width: u32,
     height: u32,
     area: u32,
+    gravity: Option<(f32, f32, f32)>,
     id: u32,
     data: Vec<Vec<u8>>,
 }
@@ -105,6 +119,19 @@ fn main() -> Result<()> {
         let mut raw_data = vec![0u8; 400];
         cursor.read_exact(&mut raw_data)?;
 
+        // Extract gravity from original data[0][0] before remapping
+        let gravity = determine_gravity(raw_data[0]);
+
+        // Generate description based on gravity
+        let description = match raw_data[0] {
+            3 => "Zero Gravity".to_string(),
+            4 => "5G (Light Gravity)".to_string(),
+            5 => "10G (Normal Gravity)".to_string(),
+            6 => "20G (Heavy Gravity)".to_string(),
+            7 => "Queer Gravity (Random)".to_string(),
+            _ => "Standard Level".to_string(),
+        };
+
         // Convert to 20x20 matrix and apply index remapping
         let data: Vec<Vec<u8>> = raw_data
             .chunks(20)
@@ -113,9 +140,11 @@ fn main() -> Result<()> {
 
         maps.push(MapEntry {
             name,
+            description,
             width,
             height,
             area,
+            gravity,
             id,
             data,
         });
@@ -179,9 +208,18 @@ fn main() -> Result<()> {
         }
 
         writeln!(output, "            name: \"{}\",", map.name)?;
+        writeln!(output, "            description: \"{}\",", map.description)?;
         writeln!(output, "            width: {},", map.width)?;
         writeln!(output, "            height: {},", map.height)?;
         writeln!(output, "            area: {},", map.area)?;
+
+        // Write gravity field
+        if let Some((x, y, z)) = map.gravity {
+            writeln!(output, "            gravity: Some(({}, {}, {})),", x, y, z)?;
+        } else {
+            writeln!(output, "            gravity: None,")?;
+        }
+
         writeln!(output, "            id: {},", map.id)?;
         write!(output, "            data: [")?;
 
