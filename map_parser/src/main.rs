@@ -4,6 +4,36 @@ use serde::Serialize;
 use std::fs::File;
 use std::io::{Read, Write};
 
+/// Remap brick indices according to the new categorization
+fn remap_index(original: u8) -> u8 {
+    match original {
+        // Preserve indices 0, 1, 2 as-is
+        0 | 1 | 2 => original,
+        // Map indices 3-11 to 0
+        3..=11 => 0,
+        // Simple stone: 12 → 20
+        12 => 20,
+        // Multi-hit bricks: 13-16 → 10-13
+        13 => 10,
+        14 => 11,
+        15 => 12,
+        16 => 13,
+        // Regular bricks: 17-53 → 21-57
+        17..=53 => original - 17 + 21,
+        // Solid/indestructible bricks: 54-61 → 90-97
+        54..=61 => original - 54 + 90,
+        _ => {
+            eprintln!("Unknown brick index encountered: {}", original);
+            original + 100
+        }
+    }
+}
+
+/// Format a u8 as a two-digit string
+fn format_double_digit(value: u8) -> String {
+    format!("{:02}", value)
+}
+
 #[derive(Debug, Serialize)]
 struct MapFile {
     magic: String,
@@ -75,8 +105,11 @@ fn main() -> Result<()> {
         let mut raw_data = vec![0u8; 400];
         cursor.read_exact(&mut raw_data)?;
 
-        // Convert to 20x20 matrix
-        let data: Vec<Vec<u8>> = raw_data.chunks(20).map(|chunk| chunk.to_vec()).collect();
+        // Convert to 20x20 matrix and apply index remapping
+        let data: Vec<Vec<u8>> = raw_data
+            .chunks(20)
+            .map(|chunk| chunk.iter().map(|&x| remap_index(x)).collect())
+            .collect();
 
         maps.push(MapEntry {
             name,
@@ -90,31 +123,36 @@ fn main() -> Result<()> {
 
     let map_file = MapFile { magic, count, maps };
 
-    // Verification
-    let verify_map = |index: usize, expected_val: u8| {
+    // Verification (using remapped indices)
+    let verify_map = |index: usize, expected_val: u8, description: &str| {
         if let Some(map) = map_file.maps.get(index) {
             let all_match = map.data.iter().flatten().all(|&x| x == expected_val);
-            println!("Map{}: All {}? {}", index, expected_val, all_match);
+            println!(
+                "Map{}: {} (All {}? {})",
+                index, description, expected_val, all_match
+            );
             if !all_match {
                 println!("  First row: {:?}", &map.data[0]);
             }
         }
     };
 
-    verify_map(0, 0);
-    verify_map(1, 1);
-    verify_map(2, 2);
-    verify_map(3, 12);
-    verify_map(4, 0);
-    verify_map(5, 3);
-    verify_map(6, 4); // Assuming second "map5" was map6
+    println!("\nVerification (with remapped indices):");
+    verify_map(0, 0, "Empty map");
+    verify_map(1, 0, "Map with original index 3 at (0,0) -> remapped to 0");
+    verify_map(2, 0, "Map with original index 3 at (0,0) -> remapped to 0");
+    verify_map(3, 0, "Map with original index 3 at (0,0) -> remapped to 0");
 
     if let Some(map7) = map_file.maps.get(7) {
-        println!("Map7 Check:");
-        let row0: Vec<u8> = (0..20).collect();
+        println!("Map7 Check (remapped):");
+        // Original row 0: 0..19
+        // Remapped: 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 10, 11, 12, 13, 21, 22, 23
+        let expected_row0: Vec<u8> = vec![
+            0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 10, 11, 12, 13, 21, 22, 23,
+        ];
         let map_row0 = &map7.data[0];
-        println!("  Row 0 matches 0..19? {}", map_row0 == &row0);
-        if map_row0 != &row0 {
+        println!("  Row 0 matches expected? {}", map_row0 == &expected_row0);
+        if map_row0 != &expected_row0 {
             println!("  Actual Row 0: {:?}", map_row0);
         }
 
@@ -122,15 +160,58 @@ fn main() -> Result<()> {
         println!("  Rest are 0? {}", rest_zeros);
     }
 
-    let pretty_config = ron::ser::PrettyConfig::default().compact_arrays(true);
-    let ron_string = ron::ser::to_string_pretty(&map_file, pretty_config)?;
-
-    // Post-process to put each row on a new line
-    // Replace "], [" with "],\n            [" to break the outer array
-    let formatted_ron = ron_string.replace("], [", "],\n            [");
-
+    // Custom RON formatting with double digits
     let mut output = File::create(&output_path)?;
-    output.write_all(formatted_ron.as_bytes())?;
+
+    // Write header
+    writeln!(output, "(")?;
+    writeln!(output, "    magic: \"{}\",", map_file.magic)?;
+    writeln!(output, "    count: {},", map_file.count)?;
+    writeln!(output, "    maps: [")?;
+
+    // Write each map
+    for (map_idx, map) in map_file.maps.iter().enumerate() {
+        if map_idx > 0 {
+            writeln!(output, "        ),")?; // Close previous map entry and add comma
+            writeln!(output, "        (")?; // Open new map entry
+        } else {
+            writeln!(output, "        (")?; // Open first map entry
+        }
+
+        writeln!(output, "            name: \"{}\",", map.name)?;
+        writeln!(output, "            width: {},", map.width)?;
+        writeln!(output, "            height: {},", map.height)?;
+        writeln!(output, "            area: {},", map.area)?;
+        writeln!(output, "            id: {},", map.id)?;
+        write!(output, "            data: [")?;
+
+        // Write data rows with double-digit formatting
+        for (row_idx, row) in map.data.iter().enumerate() {
+            if row_idx == 0 {
+                write!(output, "[")?;
+            } else {
+                write!(output, "\n                [")?;
+            }
+
+            for (col_idx, &value) in row.iter().enumerate() {
+                if col_idx > 0 {
+                    write!(output, ", ")?;
+                }
+                write!(output, "{}", format_double_digit(value))?;
+            }
+
+            if row_idx < map.data.len() - 1 {
+                write!(output, "],")?;
+            } else {
+                write!(output, "]]")?; // No comma after the last row
+            }
+        }
+        writeln!(output, ",")?; // Comma after the data array
+    }
+
+    writeln!(output, "        )")?; // Close the last map entry
+    writeln!(output, "    ],")?; // Close the maps array
+    writeln!(output, ")")?; // Close the top-level struct
 
     println!("Successfully wrote {}", output_path);
 
