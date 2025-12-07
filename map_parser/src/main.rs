@@ -128,7 +128,7 @@ fn main() -> Result<()> {
         fs::create_dir(levels_dir)?;
     }
 
-    for (i, _) in (0..count).enumerate() {
+    for i in 0..count {
         // Read fixed size entry of 432 bytes
         let mut entry_buf = [0u8; 432];
         file.read_exact(&mut entry_buf)?;
