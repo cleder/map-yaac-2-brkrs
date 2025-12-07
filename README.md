@@ -27,7 +27,26 @@ This project contains a tool to convert the custom binary map format `map100.map
 
 The output filename is automatically derived by appending `.ron` to the input filename.
 
-## Output Format
+## Input Format (Binary)
+ The input file is a binary format with the following structure:
+
+ ### File Header
+ - **Magic**: 4 bytes (e.g., "MAP\0")
+ - **Count**: `u32` (Little Endian) - number of levels in the file
+
+ ### Level Entry (432 bytes each)
+ Repeated `Count` times.
+
+ - **Name Length**: `u8` (length of the name string)
+ - **Name**: String bytes (`Name Length` bytes)
+ - **Padding**: Skips to byte offset 16 (relative to start of entry)
+ - **Width**: `u32` (Little Endian)
+ - **Height**: `u32` (Little Endian)
+ - **Area**: `u32` (Little Endian)
+ - **ID**: `u32` (Little Endian)
+ - **Data**: 400 bytes (20x20 grid, row-major)
+
+ ## Output Format
 
 Each level is stored as a separate RON file.
 These files are named `level_001.ron`, `level_002.ron`, etc.

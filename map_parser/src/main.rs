@@ -51,6 +51,54 @@ struct LevelDefinition {
     matrix: Vec<Vec<u8>>,
 }
 
+impl LevelDefinition {
+    fn to_ron_string(&self) -> String {
+        let mut output = String::new();
+        output.push_str("LevelDefinition(\n");
+        output.push_str(&format!("    number: {},\n", self.number));
+
+        if let Some(desc) = &self.description {
+            output.push_str(&format!("    description: Some(\"{}\"),\n", desc));
+        } else {
+            output.push_str("    description: None,\n");
+        }
+
+        if let Some(auth) = &self.author {
+            output.push_str(&format!("    author: Some(\"{}\"),\n", auth));
+        } else {
+            output.push_str("    author: None,\n");
+        }
+
+        if let Some((x, y, z)) = self.gravity {
+            output.push_str(&format!(
+                "    gravity: Some(({:?}, {:?}, {:?})),\n",
+                x, y, z
+            ));
+        } else {
+            output.push_str("    gravity: None,\n");
+        }
+
+        output.push_str("    matrix: [\n");
+        for (i, row) in self.matrix.iter().enumerate() {
+            output.push_str("        [");
+            for (j, val) in row.iter().enumerate() {
+                if j > 0 {
+                    output.push_str(", ");
+                }
+                output.push_str(&val.to_string());
+            }
+            if i < self.matrix.len() - 1 {
+                output.push_str("],\n");
+            } else {
+                output.push_str("]\n");
+            }
+        }
+        output.push_str("    ],\n");
+        output.push_str(")\n");
+        output
+    }
+}
+
 fn main() -> Result<()> {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -135,47 +183,7 @@ fn main() -> Result<()> {
 
         let output_filename = format!("{}/level_{:03}.ron", levels_dir, level_number);
         let mut output_file = File::create(&output_filename)?;
-
-        writeln!(output_file, "LevelDefinition(")?;
-        writeln!(output_file, "    number: {},", level_def.number)?;
-        if let Some(desc) = &level_def.description {
-            writeln!(output_file, "    description: Some(\"{}\"),", desc)?;
-        } else {
-            writeln!(output_file, "    description: None,")?;
-        }
-        if let Some(auth) = &level_def.author {
-            writeln!(output_file, "    author: Some(\"{}\"),", auth)?;
-        } else {
-            writeln!(output_file, "    author: None,")?;
-        }
-
-        if let Some((x, y, z)) = level_def.gravity {
-            writeln!(
-                output_file,
-                "    gravity: Some(({:?}, {:?}, {:?})),",
-                x, y, z
-            )?;
-        } else {
-            writeln!(output_file, "    gravity: None,")?;
-        }
-
-        writeln!(output_file, "    matrix: [")?;
-        for (i, row) in level_def.matrix.iter().enumerate() {
-            write!(output_file, "        [")?;
-            for (j, val) in row.iter().enumerate() {
-                if j > 0 {
-                    write!(output_file, ", ")?;
-                }
-                write!(output_file, "{}", val)?;
-            }
-            if i < level_def.matrix.len() - 1 {
-                writeln!(output_file, "],")?;
-            } else {
-                writeln!(output_file, "]")?;
-            }
-        }
-        writeln!(output_file, "    ],")?;
-        writeln!(output_file, ")")?; // Close the struct
+        write!(output_file, "{}", level_def.to_ron_string())?;
 
         println!("Written {}", output_filename);
     }
@@ -193,36 +201,11 @@ mod tests {
             number: 1,
             description: Some("Test Level".to_string()),
             author: Some("Tester".to_string()),
-            gravity: Some((0.0, -9.81, 0.0)),
+            gravity: Some((0.0, -9.8, 0.0)),
             matrix: vec![vec![0; 20]; 20],
         };
 
-        let mut serialized = String::new();
-        serialized.push_str("LevelDefinition(\n");
-        serialized.push_str(&format!("    number: {},\n", level.number));
-        serialized.push_str(&format!(
-            "    description: Some(\"{}\"),\n",
-            level.description.as_ref().unwrap()
-        ));
-        serialized.push_str(&format!(
-            "    author: Some(\"{}\"),\n",
-            level.author.as_ref().unwrap()
-        ));
-        let (gx, gy, gz) = level.gravity.unwrap();
-        serialized.push_str(&format!(
-            "    gravity: Some(({:?}, {:?}, {:?})),\n",
-            gx, gy, gz
-        ));
-        serialized.push_str("    matrix: [\n");
-        for row in &level.matrix {
-            serialized.push_str("        [");
-            let row_str: Vec<String> = row.iter().map(|b| b.to_string()).collect();
-            serialized.push_str(&row_str.join(", "));
-            serialized.push_str("],\n");
-        }
-        serialized.push_str("    ],\n");
-        serialized.push_str(")");
-
+        let serialized = level.to_ron_string();
         let deserialized: LevelDefinition =
             ron::from_str(&serialized).expect("Failed to deserialize");
         assert_eq!(level, deserialized);
