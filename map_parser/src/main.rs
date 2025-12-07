@@ -1,8 +1,9 @@
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt};
-use serde::Serialize;
-use std::fs::File;
+use serde::{Deserialize, Serialize};
+use std::fs::{self, File};
 use std::io::{Read, Write};
+use std::path::Path;
 
 /// Remap brick indices according to the new categorization
 fn remap_index(original: u8) -> u8 {
@@ -29,11 +30,6 @@ fn remap_index(original: u8) -> u8 {
     }
 }
 
-/// Format a u8 as a two-digit string
-fn format_double_digit(value: u8) -> String {
-    format!("{:02}", value)
-}
-
 /// Determine gravity from the original value at position [0][0]
 fn determine_gravity(gravity_index: u8) -> Option<(f32, f32, f32)> {
     match gravity_index {
@@ -46,23 +42,61 @@ fn determine_gravity(gravity_index: u8) -> Option<(f32, f32, f32)> {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct MapFile {
-    magic: String,
-    count: u32,
-    maps: Vec<MapEntry>,
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct LevelDefinition {
+    number: u32,
+    description: Option<String>,
+    author: Option<String>,
+    gravity: Option<(f32, f32, f32)>,
+    matrix: Vec<Vec<u8>>,
 }
 
-#[derive(Debug, Serialize)]
-struct MapEntry {
-    name: String,
-    description: String,
-    width: u32,
-    height: u32,
-    area: u32,
-    gravity: Option<(f32, f32, f32)>,
-    id: u32,
-    data: Vec<Vec<u8>>,
+impl LevelDefinition {
+    fn to_ron_string(&self) -> String {
+        let mut output = String::new();
+        output.push_str("LevelDefinition(\n");
+        output.push_str(&format!("    number: {},\n", self.number));
+
+        if let Some(desc) = &self.description {
+            output.push_str(&format!("    description: Some(\"{}\"),\n", desc));
+        } else {
+            output.push_str("    description: None,\n");
+        }
+
+        if let Some(auth) = &self.author {
+            output.push_str(&format!("    author: Some(\"{}\"),\n", auth));
+        } else {
+            output.push_str("    author: None,\n");
+        }
+
+        if let Some((x, y, z)) = self.gravity {
+            output.push_str(&format!(
+                "    gravity: Some(({:?}, {:?}, {:?})),\n",
+                x, y, z
+            ));
+        } else {
+            output.push_str("    gravity: None,\n");
+        }
+
+        output.push_str("    matrix: [\n");
+        for (i, row) in self.matrix.iter().enumerate() {
+            output.push_str("        [");
+            for (j, val) in row.iter().enumerate() {
+                if j > 0 {
+                    output.push_str(", ");
+                }
+                output.push_str(&val.to_string());
+            }
+            if i < self.matrix.len() - 1 {
+                output.push_str("],\n");
+            } else {
+                output.push_str("]\n");
+            }
+        }
+        output.push_str("    ],\n");
+        output.push_str(")\n");
+        output
+    }
 }
 
 fn main() -> Result<()> {
@@ -76,10 +110,7 @@ fn main() -> Result<()> {
     }
 
     let input_path = &args[1];
-    let output_path = format!("{}.ron", input_path);
-
     println!("Reading from: {}", input_path);
-    println!("Writing to: {}", output_path);
 
     let mut file = File::open(input_path)?;
 
@@ -91,9 +122,13 @@ fn main() -> Result<()> {
     let count = file.read_u32::<LittleEndian>()?;
     println!("Count: {}", count);
 
-    let mut maps = Vec::new();
+    // Create levels directory
+    let levels_dir = "levels";
+    if !Path::new(levels_dir).exists() {
+        fs::create_dir(levels_dir)?;
+    }
 
-    for _ in 0..count {
+    for i in 0..count {
         // Read fixed size entry of 432 bytes
         let mut entry_buf = [0u8; 432];
         file.read_exact(&mut entry_buf)?;
@@ -106,152 +141,73 @@ fn main() -> Result<()> {
         let name = String::from_utf8(name_bytes)?;
 
         // Advance cursor to byte 16 (start of u32 fields)
-        // 1 byte len + name_len bytes read so far.
-        // We need to skip (16 - (1 + name_len)) bytes.
-        // Or just set position absolute.
         cursor.set_position(16);
 
-        let width = cursor.read_u32::<LittleEndian>()?;
-        let height = cursor.read_u32::<LittleEndian>()?;
-        let area = cursor.read_u32::<LittleEndian>()?;
-        let id = cursor.read_u32::<LittleEndian>()?;
+        let _width = cursor.read_u32::<LittleEndian>()?;
+        let _height = cursor.read_u32::<LittleEndian>()?;
+        let _area = cursor.read_u32::<LittleEndian>()?;
+        let _id = cursor.read_u32::<LittleEndian>()?;
 
         let mut raw_data = vec![0u8; 400];
         cursor.read_exact(&mut raw_data)?;
 
         // Extract gravity from original data[0][0] before remapping
-        let gravity = determine_gravity(raw_data[0]);
+        let gravity_val = determine_gravity(raw_data[0]);
 
         // Generate description based on gravity
-        let description = match raw_data[0] {
-            3 => "Zero Gravity".to_string(),
-            4 => "5G (Light Gravity)".to_string(),
-            5 => "10G (Normal Gravity)".to_string(),
-            6 => "20G (Heavy Gravity)".to_string(),
-            7 => "Queer Gravity (Random)".to_string(),
-            _ => "Standard Level".to_string(),
+        let gravity_desc = match raw_data[0] {
+            3 => "Zero Gravity",
+            4 => "5G (Light Gravity)",
+            5 => "10G (Normal Gravity)",
+            6 => "20G (Heavy Gravity)",
+            7 => "Queer Gravity (Random)",
+            _ => "Standard Level",
         };
+        let description = format!("YAAC - {} - {}", name, gravity_desc);
 
         // Convert to 20x20 matrix and apply index remapping
-        let data: Vec<Vec<u8>> = raw_data
+        let matrix: Vec<Vec<u8>> = raw_data
             .chunks(20)
             .map(|chunk| chunk.iter().map(|&x| remap_index(x)).collect())
             .collect();
 
-        maps.push(MapEntry {
-            name,
-            description,
-            width,
-            height,
-            area,
-            gravity,
-            id,
-            data,
-        });
+        let level_number = (i + 1) as u32;
+
+        let level_def = LevelDefinition {
+            number: level_number,
+            description: Some(description),
+            author: Some("Christian Ledermann".to_string()),
+            gravity: gravity_val,
+            matrix,
+        };
+
+        let output_filename = format!("{}/level_{:03}.ron", levels_dir, level_number);
+        let mut output_file = File::create(&output_filename)?;
+        write!(output_file, "{}", level_def.to_ron_string())?;
+
+        println!("Written {}", output_filename);
     }
-
-    let map_file = MapFile { magic, count, maps };
-
-    // Verification (using remapped indices)
-    let verify_map = |index: usize, expected_val: u8, description: &str| {
-        if let Some(map) = map_file.maps.get(index) {
-            let all_match = map.data.iter().flatten().all(|&x| x == expected_val);
-            println!(
-                "Map{}: {} (All {}? {})",
-                index, description, expected_val, all_match
-            );
-            if !all_match {
-                println!("  First row: {:?}", &map.data[0]);
-            }
-        }
-    };
-
-    println!("\nVerification (with remapped indices):");
-    verify_map(0, 0, "Empty map");
-    verify_map(1, 0, "Map with original index 3 at (0,0) -> remapped to 0");
-    verify_map(2, 0, "Map with original index 3 at (0,0) -> remapped to 0");
-    verify_map(3, 0, "Map with original index 3 at (0,0) -> remapped to 0");
-
-    if let Some(map7) = map_file.maps.get(7) {
-        println!("Map7 Check (remapped):");
-        // Original row 0: 0..19
-        // Remapped: 0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 10, 11, 12, 13, 21, 22, 23
-        let expected_row0: Vec<u8> = vec![
-            0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 10, 11, 12, 13, 21, 22, 23,
-        ];
-        let map_row0 = &map7.data[0];
-        println!("  Row 0 matches expected? {}", map_row0 == &expected_row0);
-        if map_row0 != &expected_row0 {
-            println!("  Actual Row 0: {:?}", map_row0);
-        }
-
-        let rest_zeros = map7.data.iter().skip(1).flatten().all(|&x| x == 0);
-        println!("  Rest are 0? {}", rest_zeros);
-    }
-
-    // Custom RON formatting with double digits
-    let mut output = File::create(&output_path)?;
-
-    // Write header
-    writeln!(output, "(")?;
-    writeln!(output, "    magic: \"{}\",", map_file.magic)?;
-    writeln!(output, "    count: {},", map_file.count)?;
-    writeln!(output, "    maps: [")?;
-
-    // Write each map
-    for (map_idx, map) in map_file.maps.iter().enumerate() {
-        if map_idx > 0 {
-            writeln!(output, "        ),")?; // Close previous map entry and add comma
-            writeln!(output, "        (")?; // Open new map entry
-        } else {
-            writeln!(output, "        (")?; // Open first map entry
-        }
-
-        writeln!(output, "            name: \"{}\",", map.name)?;
-        writeln!(output, "            description: \"{}\",", map.description)?;
-        writeln!(output, "            width: {},", map.width)?;
-        writeln!(output, "            height: {},", map.height)?;
-        writeln!(output, "            area: {},", map.area)?;
-
-        // Write gravity field
-        if let Some((x, y, z)) = map.gravity {
-            writeln!(output, "            gravity: Some(({}, {}, {})),", x, y, z)?;
-        } else {
-            writeln!(output, "            gravity: None,")?;
-        }
-
-        writeln!(output, "            id: {},", map.id)?;
-        write!(output, "            data: [")?;
-
-        // Write data rows with double-digit formatting
-        for (row_idx, row) in map.data.iter().enumerate() {
-            if row_idx == 0 {
-                write!(output, "[")?;
-            } else {
-                write!(output, "\n                [")?;
-            }
-
-            for (col_idx, &value) in row.iter().enumerate() {
-                if col_idx > 0 {
-                    write!(output, ", ")?;
-                }
-                write!(output, "{}", format_double_digit(value))?;
-            }
-
-            if row_idx < map.data.len() - 1 {
-                write!(output, "],")?;
-            } else {
-                write!(output, "]]")?; // No comma after the last row
-            }
-        }
-        writeln!(output, ",")?; // Comma after the data array
-    }
-
-    writeln!(output, "        )")?; // Close the last map entry
-    writeln!(output, "    ],")?; // Close the maps array
-    writeln!(output, ")")?; // Close the top-level struct
-
-    println!("Successfully wrote {}", output_path);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deserialization() {
+        let level = LevelDefinition {
+            number: 1,
+            description: Some("Test Level".to_string()),
+            author: Some("Tester".to_string()),
+            gravity: Some((0.0, -9.8, 0.0)),
+            matrix: vec![vec![0; 20]; 20],
+        };
+
+        let serialized = level.to_ron_string();
+        let deserialized: LevelDefinition =
+            ron::from_str(&serialized).expect("Failed to deserialize");
+        assert_eq!(level, deserialized);
+    }
 }
