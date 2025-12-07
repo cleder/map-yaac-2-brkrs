@@ -66,7 +66,7 @@ LevelDefinition(
   number: 1,
   description: Some("YAAC - {name} - {gravity}"),
   author: Some("Christian Ledermann"),
-  gravity: Some((0.0, -9.81, 0.0)),
+  gravity: Some((10.0, 0.0, 0.0)),
   matrix: [
     // 20 rows of 20 u8 values each (outer vector = rows)
     [0,0,0,...],
