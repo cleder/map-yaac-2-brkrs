@@ -56,9 +56,9 @@ The output files are stored in the `levels` directory.
 Fields
 
 - `number: u32` — level index/identifier must match the filename `level_{:03}.ron`.
-- `gravity: Option<(f32,f32,f32)>` — optional gravity override for the level (X, Y, Z). The Z component is always 0. Levels with Light Gravity (5G) have gravity (2.0, 0.0, 0.0). Levels with Normal Gravity (10G) have gravity (10.0, 0.0, 0.0), Leavels with heavy gravity (20G) have gravity (20.0, 0.0, 0.0). Levels with Queer Gravity have gravity (-1.0, -0.5, 0.0). Levels with Zero Gravity have gravity (0.0, 0.0, 0.0).
+- `gravity: Option<(f32,f32,f32)>` — optional gravity override for the level (X, Y, Z). The Z component is always 0. Levels with Light Gravity (5G) have gravity (2.0, 0.0, 0.0). Levels with Normal Gravity (10G) have gravity (10.0, 0.0, 0.0). Levels with heavy gravity (20G) have gravity (20.0, 0.0, 0.0). Levels with Queer Gravity have gravity (-1.0, -0.5, 0.0). Levels with Zero Gravity have gravity (0.0, 0.0, 0.0).
 - `matrix: Vec<Vec<u8>>` — the tile grid, encoded as rows of byte values.
-- `description: Option<String>` — level design documentation, here alwyas `YAAC ` followed by the level name and the gravity description.
+- `description: Option<String>` — level design documentation, here always `YAAC ` followed by the level name and the gravity description.
 - `author: Option<String>` — contributor attribution here always `Christian Ledermann`.
 
 ```ron
