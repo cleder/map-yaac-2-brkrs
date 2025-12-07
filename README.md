@@ -29,22 +29,29 @@ The output filename is automatically derived by appending `.ron` to the input fi
 
 ## Output Format
 
-The output file `map100.ron` contains a serialized `MapFile` struct with the following fields:
+Each level is stored as a separate RON file.
+These files are named `level_001.ron`, `level_002.ron`, etc.
 
--   `magic`: File signature ("ML01")
--   `count`: Number of maps (100)
--   `maps`: List of map entries
+The output files are stored in the `levels` directory.
 
-Each map entry contains:
--   `name`: Name of the map (e.g., "Map0")
--   `width`: Width of the map (20)
--   `height`: Height of the map (20)
--   `area`: Total area (400)
--   `id`: Unique identifier
--   `data`: 20x20 matrix of byte values (`Vec<Vec<u8>>`)
+Fields
 
-## Project Structure
+- `number: u32` — level index/identifier must match the filename `level_{:03}.ron`.
+- `gravity: Option<(f32,f32,f32)>` — optional gravity override for the level (X, Y, Z). The Z component is always 0. Levels with Light Gravity (5G) have gravity (2.0, 0.0, 0.0). Levels with Normal Gravity (10G) have gravity (10.0, 0.0, 0.0), Leavels with heavy gravity (20G) have gravity (20.0, 0.0, 0.0). Levels with Queer Gravity have gravity (-1.0, -0.5, 0.0). Levels with Zero Gravity have gravity (0.0, 0.0, 0.0).
+- `matrix: Vec<Vec<u8>>` — the tile grid, encoded as rows of byte values.
+- `description: Option<String>` — level design documentation, here alwyas `YAAC ` followed by the level name and the gravity description.
+- `author: Option<String>` — contributor attribution here always `Christian Ledermann`.
 
--   `map100.map`: The source binary file.
--   `map100.ron`: The generated output file.
--   `map_parser/`: Rust source code for the converter tool.
+```ron
+LevelDefinition(
+  number: 1,
+  description: Some("YAAC - {name} - {gravity}"),
+  author: Some("Christian Ledermann"),
+  gravity: Some((0.0, -9.81, 0.0)),
+  matrix: [
+    // 20 rows of 20 u8 values each (outer vector = rows)
+    [0,0,0,...],
+    ...
+  ],
+)
+```
